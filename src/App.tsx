@@ -23,6 +23,14 @@ const BRANCH_CONFIG: Record<
       "https://script.google.com/macros/s/AKfycbw4leNN1qNUYSoLI4Ppss7BZgmcKrjrJWn_DsgR6Zsl6KxXLky0r08EOPmMsAVJzh46pQ/exec",
     bgUrl: "/dokki.png",
   },
+  alexandrie: {
+    name: "Alexandrie",
+    loginUrl:
+      "https://script.google.com/macros/s/AKfycbxU2Znfe2i2ehND-mPzggchb_sgDM0qTDxnV8REuAPQgqf5RzNUeAtb-pApKeYhax2m9w/exec",
+    uploadUrl:
+      "https://script.google.com/macros/s/AKfycbzYAmvYAW42v3dRx0fqwD5vIZ6KOMtvkVv6f8wxiDKZzop_GG5tRCukVkx-RAyCaA/exec",
+    bgUrl: "/alexandrie.png",
+  },
 };
 
 type RecordingState = "idle" | "recording" | "paused" | "uploading" | "done";
@@ -220,6 +228,9 @@ function RecordingScreen({
   const streamRef = useRef<MediaStream | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  
+  // Reference to hold the screen wake lock instance
+  const wakeLockRef = useRef<any>(null);
 
   const startTimer = useCallback(() => {
     timerRef.current = setInterval(() => {
@@ -261,6 +272,16 @@ function RecordingScreen({
       };
 
       mediaRecorder.start();
+
+      // Request screen wake lock to prevent the device screen from sleeping
+      if ("wakeLock" in navigator) {
+        try {
+          wakeLockRef.current = await (navigator as any).wakeLock.request("screen");
+        } catch (err) {
+          console.error("Wake Lock activate error:", err);
+        }
+      }
+
       setRecordingState("recording");
       setStatusMsg("Aufnahme läuft...");
       startTimer();
@@ -278,9 +299,19 @@ function RecordingScreen({
     }
   }, [stopTimer]);
 
-  const handleResume = useCallback(() => {
+  const handleResume = useCallback(async () => {
     if (mediaRecorderRef.current?.state === "paused") {
       mediaRecorderRef.current.resume();
+
+      // Re-request wake lock upon recording resume if it was released
+      if ("wakeLock" in navigator && !wakeLockRef.current) {
+        try {
+          wakeLockRef.current = await (navigator as any).wakeLock.request("screen");
+        } catch (err) {
+          console.error("Wake Lock resume error:", err);
+        }
+      }
+
       startTimer();
       setRecordingState("recording");
       setStatusMsg("Aufnahme fortgesetzt...");
@@ -292,6 +323,17 @@ function RecordingScreen({
     if (!recorder) return;
 
     stopTimer();
+
+    // Release the wake lock and allow the screen to sleep normally
+    if (wakeLockRef.current !== null) {
+      try {
+        wakeLockRef.current.release().then(() => {
+          wakeLockRef.current = null;
+        });
+      } catch (err) {
+        console.error("Wake Lock release error:", err);
+      }
+    }
 
     recorder.onstop = async () => {
       const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
